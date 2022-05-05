@@ -1,0 +1,123 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: "Test Go"
+    strategy:
+      fail-fast: false
+      matrix:
+        # https://docs.github.com/en/free-pro-team@latest/actions/reference/specifications-for-github-hosted-runners#supported-runners-and-hardware-resources
+        platform: [ubuntu-20.04, macos-10.15]
+    runs-on: ${{ matrix.platform }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@master
+      - uses: actions/setup-go@v2
+        with:
+          go-version: 1.16
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+      - uses: actions/cache@v2
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ hashFiles('**/requirements-dev.txt') }}
+          restore-keys: |
+            pip-${{ secrets.CACHE_VERSION }}-
+      - name: Install Python dependencies
+        run: pip install -r requirements-dev.txt
+      - uses: actions/cache@v2
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-${{ secrets.CACHE_VERSION }}-
+      - name: "Build"
+        run: make build
+      - name: Test
+        run: make test-go
+
+  test-python:
+    name: "Test Python ${{ matrix.python-version }}"
+    runs-on: ubuntu-20.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.7", "3.8", "3.9", "3.10"]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@master
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: actions/cache@v2
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ hashFiles('**/requirements-dev.txt') }}
+          restore-keys: |
+            pip-${{ secrets.CACHE_VERSION }}-
+      - name: Install Python dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Test
+        run: make test-python
+
+  # cannot run this on mac due to licensing issues: https://github.com/actions/virtual-environments/issues/2150
+  test-integration:
+    name: "Test integration"
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@master
+      - uses: actions/setup-go@v2
+        with:
+          go-version: 1.16
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+      - uses: actions/cache@v2
+        with:
+          path: ~/go/pkg/mod
+          key: go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            go-${{ secrets.CACHE_VERSION }}-
+      - uses: actions/cache@v2
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ hashFiles('**/requirements-dev.txt') }}
+          restore-keys: |
+            pip-${{ secrets.CACHE_VERSION }}-
+      - name: Install Python dependencies
+        run: |
+          pip install -r requirements-dev.txt
+      - name: Test
+        run: make test-integration
+
+  release:
+    needs: [test, test-integration]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v2
+        with:
+          go-version: 1.16
+      - name: Build dependencies
+        run: make build-dependencies
+      - uses: goreleaser/goreleaser-action@v2
+        with:
+          version: latest
+          args: release --rm-dist
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
