@@ -55,8 +55,6 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@master
-      - name: Setup Python
         uses: actions/setup-python@v2
         with:
           python-version: ${{ matrix.python-version }}
